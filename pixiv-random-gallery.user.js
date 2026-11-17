@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         Pixiv Random Gallery
 // @namespace    pixiv-random-gallery
-// @version      2.0.1
+// @version      2.0.2
 // @description  Pixiv bookmarks random gallery with history and multi-page support
 // @match        https://www.pixiv.net/users/*/bookmarks/artworks*
 // @grant        none
