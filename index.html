@@ -176,39 +176,71 @@ function exportData() {
   URL.revokeObjectURL(a.href);
 }
 
+
 function importData(event) {
   const file = event.target.files[0];
   if (!file) return;
+
   const reader = new FileReader();
 
   reader.onload = () => {
     try {
       const data = JSON.parse(reader.result);
-      if (!Array.isArray(data)) throw new Error();
+
+      // 配列形式とPixiv Exporter形式の両方に対応
+      const items = Array.isArray(data)
+        ? data
+        : data.works;
+
+      if (!Array.isArray(items)) {
+        throw new Error("作品一覧が見つかりません");
+      }
+
       let added = 0;
 
-      data.forEach(item => {
+      items.forEach(item => {
         const id = String(item.id || "").trim();
-        if (/^\d+$/.test(id) && !works.some(w => w.id === id)) {
-          works.push({
-            id,
-            url: "https://www.pixiv.net/artworks/" + id
-          });
+
+        if (!/^\d+$/.test(id)) return;
+
+        const existing = works.find(w => w.id === id);
+
+        const newWork = {
+          ...item,
+          id,
+          url: item.url ||
+            "https://www.pixiv.net/artworks/" + id
+        };
+
+        if (existing) {
+          Object.assign(existing, newWork);
+        } else {
+          works.push(newWork);
           added++;
         }
       });
 
       save();
+
       document.getElementById("message").textContent =
-        added + "件読み込みました";
-    } catch {
-      alert("JSONファイルを読み込めませんでした");
+        added + "件追加しました（全" + works.length + "件）";
+
+      alert(
+        "読み込み完了！\n" +
+        added + "件を追加しました。\n" +
+        "合計：" + works.length + "件"
+      );
+
+    } catch (error) {
+      alert("読み込みエラー：" + error.message);
     }
+
     event.target.value = "";
   };
 
   reader.readAsText(file);
 }
+
 
 function clearWorks() {
   if (!confirm("登録した作品をすべて削除しますか？")) return;
