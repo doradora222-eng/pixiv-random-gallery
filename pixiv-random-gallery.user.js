@@ -165,18 +165,44 @@
       $("link").href =
         "https://www.pixiv.net/artworks/" + work.id;
 
+      
       const img = $("image");
+
       img.onload = () => {
-        $("status").textContent = "全 " + total + " 件から選択";
+        $("status").textContent = "高画質画像を表示中（全 " + total + " 件）";
         img.style.display = "block";
       };
+
       img.onerror = () => {
-        $("status").textContent =
-          "画像を表示できませんでした。pixivで作品を開いてください。";
+        $("status").textContent = "高画質画像を表示できませんでした";
         img.style.display = "none";
       };
 
-      img.src = work.url;
+      try {
+        const pageResponse = await fetch(
+          `/ajax/illust/${work.id}/pages`,
+          { credentials: "same-origin" }
+        );
+
+        if (!pageResponse.ok) {
+          throw new Error("画像情報の取得に失敗");
+        }
+
+        const pageJson = await pageResponse.json();
+
+        if (pageJson.error || !pageJson.body?.length) {
+          throw new Error("画像URLが見つかりません");
+        }
+
+        const urls = pageJson.body[0].urls;
+
+        img.src = urls.regular || urls.original || work.url;
+
+      } catch (error) {
+        console.warn("高画質画像取得エラー:", error);
+        img.src = work.url;
+      }
+
 
       $("status").textContent = "画像を読み込んでいます...";
 
