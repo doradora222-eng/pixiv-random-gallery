@@ -225,4 +225,35 @@
 
   $("next").addEventListener("click", nextWork);
 
+  // スワイプ操作
+  let touchStartX = 0;
+  let touchStartY = 0;
+
+  overlay.addEventListener("touchstart", event => {
+    if (event.target.closest("button, a")) return;
+
+    const touch = event.changedTouches[0];
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+  }, { passive: true });
+
+  overlay.addEventListener("touchend", event => {
+    if (event.target.closest("button, a")) return;
+
+    const touch = event.changedTouches[0];
+
+    const diffX = touch.clientX - touchStartX;
+    const diffY = touch.clientY - touchStartY;
+
+    // 横方向に60px以上スワイプした場合
+    if (Math.abs(diffX) > 60 &&
+        Math.abs(diffX) > Math.abs(diffY) * 1.3) {
+
+      if (diffX < 0) {
+        // 左スワイプ：次の作品
+        nextWork();
+      }
+    }
+  }, { passive: true });
+  
 })();
