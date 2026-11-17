@@ -306,9 +306,9 @@
       <img id="prg-image" alt="Pixiv illustration">
       <div id="prg-controls">
         <button id="prg-work-prev">前の作品</button>
-        <button id="prg-page-prev">前のページ</button>
-        <span id="prg-page-number"></span>
-        <button id="prg-page-next">次のページ</button>
+<button id="prg-page-next">次のページ</button>
+<span id="prg-page-number"></span>
+<button id="prg-page-prev">前のページ</button>
         <button id="prg-work-next">次の作品 🎲</button>
       </div>
     `;
