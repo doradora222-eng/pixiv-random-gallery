@@ -1,0 +1,226 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#252338">
+<title>Pixiv Random Gallery</title>
+<style>
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 24px 16px;
+  background: #171625;
+  color: white;
+  font-family: -apple-system, sans-serif;
+}
+main { max-width: 600px; margin: auto; }
+h1 { text-align: center; font-size: 25px; }
+.sub { text-align: center; color: #aaa; }
+.panel {
+  background: #29273b;
+  border-radius: 16px;
+  padding: 18px;
+  margin: 20px 0;
+}
+textarea {
+  width: 100%;
+  height: 130px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #555;
+  background: #171625;
+  color: white;
+  font-size: 15px;
+}
+button {
+  border: 0;
+  border-radius: 10px;
+  padding: 13px;
+  font-size: 15px;
+  font-weight: bold;
+  cursor: pointer;
+}
+.primary {
+  width: 100%;
+  background: #8b79e8;
+  color: white;
+  margin-top: 12px;
+}
+.secondary {
+  background: #44415b;
+  color: white;
+  margin: 4px;
+}
+#count { color: #c6baff; }
+#result {
+  text-align: center;
+  padding: 24px 8px;
+}
+#result h2 { font-size: 19px; }
+#workLink {
+  display: inline-block;
+  background: #8b79e8;
+  color: white;
+  padding: 13px 24px;
+  border-radius: 10px;
+  text-decoration: none;
+  margin-top: 12px;
+}
+.small { color: #aaa; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Pixiv Random Gallery</h1>
+  <p class="sub">お気に入り作品をランダムに楽しもう</p>
+
+  <section class="panel">
+    <h3>作品URLを登録</h3>
+    <p class="small">pixivの作品URLを1行ずつ貼り付けてください。</p>
+    <textarea id="urls" placeholder="https://www.pixiv.net/artworks/12345678&#10;https://www.pixiv.net/artworks/23456789"></textarea>
+    <button class="primary" onclick="addWorks()">作品を登録する</button>
+    <p id="message" class="small"></p>
+  </section>
+
+  <section class="panel" id="result">
+    <p class="small">YOUR RANDOM PICKUP</p>
+    <h2 id="workTitle">まだ作品がありません</h2>
+    <p id="workNumber" class="small"></p>
+    <a id="workLink" href="#" target="_blank"
+       rel="noopener" hidden>pixivで作品を見る ↗</a>
+    <button class="primary" onclick="randomWork()">🎲 次の作品</button>
+  </section>
+
+  <section class="panel">
+    <h3>登録状況</h3>
+    <p>登録作品数：<strong id="count">0</strong> 件</p>
+    <button class="secondary" onclick="exportData()">データを書き出す</button>
+    <button class="secondary" onclick="document.getElementById('file').click()">データを読み込む</button>
+    <input type="file" id="file" accept=".json,application/json"
+           hidden onchange="importData(event)">
+    <button class="secondary" onclick="clearWorks()">全データ削除</button>
+  </section>
+</main>
+
+<script>
+const KEY = "pixivRandomWorks";
+const HISTORY = "pixivRandomHistory";
+let works = JSON.parse(localStorage.getItem(KEY) || "[]");
+let history = JSON.parse(localStorage.getItem(HISTORY) || "[]");
+
+function save() {
+  localStorage.setItem(KEY, JSON.stringify(works));
+  localStorage.setItem(HISTORY, JSON.stringify(history));
+  document.getElementById("count").textContent = works.length;
+}
+
+function addWorks() {
+  const input = document.getElementById("urls").value;
+  const matches = input.match(/https?:\/\/(?:www\.)?pixiv\.net\/artworks\/\d+/g) || [];
+  let added = 0;
+
+  matches.forEach(url => {
+    const id = url.match(/artworks\/(\d+)/)[1];
+    if (!works.some(w => w.id === id)) {
+      works.push({
+        id,
+        url: "https://www.pixiv.net/artworks/" + id
+      });
+      added++;
+    }
+  });
+
+  save();
+  document.getElementById("message").textContent =
+    added + "件追加しました（重複は除外）";
+  document.getElementById("urls").value = "";
+}
+
+function randomWork() {
+  if (!works.length) {
+    document.getElementById("workTitle").textContent =
+      "まず作品URLを登録してください";
+    return;
+  }
+
+  let remaining = works.filter(w => !history.includes(w.id));
+
+  if (!remaining.length) {
+    history = [];
+    remaining = [...works];
+  }
+
+  const selected = remaining[Math.floor(Math.random() * remaining.length)];
+  history.push(selected.id);
+  save();
+
+  document.getElementById("workTitle").textContent =
+    "作品ID：" + selected.id;
+  document.getElementById("workNumber").textContent =
+    "全 " + works.length + " 件から選択";
+  const link = document.getElementById("workLink");
+  link.href = selected.url;
+  link.hidden = false;
+}
+
+function exportData() {
+  const blob = new Blob([JSON.stringify(works, null, 2)], {
+    type: "application/json"
+  });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "pixiv-bookmarks.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function importData(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!Array.isArray(data)) throw new Error();
+      let added = 0;
+
+      data.forEach(item => {
+        const id = String(item.id || "").trim();
+        if (/^\d+$/.test(id) && !works.some(w => w.id === id)) {
+          works.push({
+            id,
+            url: "https://www.pixiv.net/artworks/" + id
+          });
+          added++;
+        }
+      });
+
+      save();
+      document.getElementById("message").textContent =
+        added + "件読み込みました";
+    } catch {
+      alert("JSONファイルを読み込めませんでした");
+    }
+    event.target.value = "";
+  };
+
+  reader.readAsText(file);
+}
+
+function clearWorks() {
+  if (!confirm("登録した作品をすべて削除しますか？")) return;
+  works = [];
+  history = [];
+  save();
+  document.getElementById("workTitle").textContent = "まだ作品がありません";
+  document.getElementById("workNumber").textContent = "";
+  document.getElementById("workLink").hidden = true;
+}
+
+save();
+</script>
+</body>
+</html>
