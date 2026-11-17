@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         Pixiv Random Gallery
 // @namespace    pixiv-random-gallery
-// @version      2.0.2
+// @version      2.0.3
 // @description  Pixiv bookmarks random gallery with history and multi-page support
 // @match        https://www.pixiv.net/users/*/bookmarks/artworks*
 // @grant        none
@@ -138,13 +138,16 @@
       $("prg-status").textContent = "画像を読み込めませんでした";
     };
 
-    $("prg-status").textContent = entry.work.title || "";
+    const status = $("prg-status");
+status.textContent = entry.work.title || "Pixivで作品を見る";
+status.href = `https://www.pixiv.net/artworks/${entry.work.id}`;
     img.src = entry.pages[entry.pageIndex];
   }
 
   async function openWork(work, addToHistory = true) {
     busy = true;
     updateButtons(null);
+    $("prg-status").removeAttribute("href");
     $("prg-status").textContent = "作品を読み込み中…";
 
     try {
@@ -300,7 +303,7 @@
     overlay.id = "prg-overlay";
     overlay.innerHTML = `
       <div id="prg-top">
-        <span id="prg-status">準備完了</span>
+        <a id="prg-status" href="#" target="_blank" rel="noopener noreferrer">準備完了</a>
         <button id="prg-close">閉じる ✕</button>
       </div>
       <img id="prg-image" alt="Pixiv illustration">
