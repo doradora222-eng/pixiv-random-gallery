@@ -86,6 +86,10 @@ button {
 
   <section class="panel" id="result">
     <p class="small">YOUR RANDOM PICKUP</p>
+    <img id="workImage"
+     alt="Pixiv illustration"
+     hidden
+     style="width:100%;max-height:70vh;object-fit:contain;border-radius:12px;margin:16px 0;">
     <h2 id="workTitle">まだ作品がありません</h2>
     <p id="workNumber" class="small"></p>
     <a id="workLink" href="#" target="_blank"
@@ -138,10 +142,11 @@ function addWorks() {
   document.getElementById("urls").value = "";
 }
 
+
 function randomWork() {
   if (!works.length) {
     document.getElementById("workTitle").textContent =
-      "まず作品URLを登録してください";
+      "まず作品を登録してください";
     return;
   }
 
@@ -152,18 +157,34 @@ function randomWork() {
     remaining = [...works];
   }
 
-  const selected = remaining[Math.floor(Math.random() * remaining.length)];
+  const selected =
+    remaining[Math.floor(Math.random() * remaining.length)];
+
   history.push(selected.id);
   save();
 
   document.getElementById("workTitle").textContent =
-    "作品ID：" + selected.id;
+    selected.title || "作品ID：" + selected.id;
+
   document.getElementById("workNumber").textContent =
-    "全 " + works.length + " 件から選択";
+    "作者：" + (selected.author || "不明") +
+    " / 全 " + works.length + " 件";
+
+  const img = document.getElementById("workImage");
+
+  if (selected.image) {
+    img.src = selected.image;
+    img.hidden = false;
+  } else {
+    img.hidden = true;
+    img.removeAttribute("src");
+  }
+
   const link = document.getElementById("workLink");
   link.href = selected.url;
   link.hidden = false;
 }
+
 
 function exportData() {
   const blob = new Blob([JSON.stringify(works, null, 2)], {
