@@ -2,8 +2,8 @@
 // ==UserScript==
 // @name         Pixiv Random Gallery
 // @namespace    pixiv-random-gallery
-// @version      2.0.0
-// @description  Random Pixiv gallery with history and manga pages
+// @version      2.0.1
+// @description  Pixiv bookmarks random gallery with history and multi-page support
 // @match        https://www.pixiv.net/users/*/bookmarks/artworks*
 // @grant        none
 // ==/UserScript==
@@ -11,387 +11,354 @@
 (() => {
   "use strict";
 
-  if (document.getElementById("prg-gallery-launcher")) return;
+  if (window.__pixivRandomGalleryLoaded) return;
+  window.__pixivRandomGalleryLoaded = true;
 
-  const match = location.pathname.match(
-    /\/users\/(\d+)\/bookmarks\/artworks/
-  );
-  if (!match) return;
-
-  const userId = match[1];
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const $ = (id) => document.getElementById(id);
+  const userId = location.pathname.match(/\/users\/(\d+)/)?.[1];
+  if (!userId) return;
 
   let history = [];
   let historyIndex = -1;
   let busy = false;
   let touchStartX = 0;
   let touchStartY = 0;
-  let requestId = 0;
 
-  const button = document.createElement("button");
-  button.id = "prg-gallery-launcher";
-  button.textContent = "🎲 ランダムギャラリー";
-  button.style.cssText = `
-    position:fixed;z-index:999998;bottom:25px;
-    left:50%;transform:translateX(-50%);
-    padding:15px 22px;border:0;border-radius:30px;
-    background:#8068df;color:white;font-size:16px;
-    font-weight:bold;box-shadow:0 3px 15px #0006;
-  `;
-  document.body.appendChild(button);
-
-  const overlay = document.createElement("div");
-  overlay.style.cssText = `
-    display:none;position:fixed;inset:0;
-    z-index:999999;background:#111;color:white;
-    padding:20px;overflow:auto;text-align:center;
-    font-family:-apple-system,sans-serif;
-  `;
-
-  overlay.innerHTML = `
-    <div style="max-width:700px;margin:auto;padding-top:20px">
-      <button id="prg-close" style="
-        float:right;padding:10px 18px;border:0;
-        border-radius:10px;background:#444;color:white">
-        閉じる
-      </button>
-
-      <h2 style="clear:both;padding-top:25px">
-        Pixiv Random Gallery
-      </h2>
-
-      <p id="prg-status">準備中...</p>
-
-      <img id="prg-image" alt="作品画像" style="
-        display:none;width:100%;max-height:68vh;
-        object-fit:contain;border-radius:10px">
-
-      <p id="prg-page-number" style="color:#aaa"></p>
-
-      <div style="display:flex;gap:10px;margin:15px 0">
-        <button id="prg-page-prev" style="
-          flex:1;padding:12px;border:0;border-radius:10px;
-          background:#444;color:white">
-          前のページ
-        </button>
-        <button id="prg-page-next" style="
-          flex:1;padding:12px;border:0;border-radius:10px;
-          background:#444;color:white">
-          次のページ
-        </button>
-      </div>
-
-      <h3 id="prg-title"></h3>
-      <p id="prg-author" style="color:#aaa"></p>
-
-      <a id="prg-link" target="_blank" rel="noopener"
-        style="color:#c6baff;display:block;margin:18px">
-        pixivで作品を見る ↗
-      </a>
-
-      <div style="display:flex;gap:10px">
-        <button id="prg-work-prev" style="
-          flex:1;padding:16px 8px;border:0;
-          border-radius:12px;background:#444;color:white;
-          font-size:15px">
-          ← 前の作品
-        </button>
-
-        <button id="prg-next" style="
-          flex:1;padding:16px 8px;border:0;
-          border-radius:12px;background:#8068df;
-          color:white;font-size:15px;font-weight:bold">
-          🎲 次の作品
-        </button>
-      </div>
-    </div>
-  `;
-
-  document.body.appendChild(overlay);
-
-  const $ = id => overlay.querySelector("#prg-" + id);
-
-  async function getPage(rest, offset, limit) {
-    const params = new URLSearchParams({
-      tag: "",
-      offset: String(offset),
-      limit: String(limit),
-      rest,
-      lang: "ja"
+  const api = async (url) => {
+    const response = await fetch(url, {
+      credentials: "include"
     });
-
-    const response = await fetch(
-      `/ajax/user/${userId}/illusts/bookmarks?${params}`,
-      { credentials: "same-origin" }
-    );
-
-    if (!response.ok) {
-      throw new Error("通信エラー：" + response.status);
-    }
-
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const json = await response.json();
-
-    if (json.error || !json.body) {
-      throw new Error(json.message || "取得できませんでした");
-    }
-
+    if (json.error) throw new Error(json.message || "Pixiv API error");
     return json.body;
-  }
+  };
+
+  const bookmarkUrl = (rest, offset, limit = 1) =>
+    `/ajax/user/${userId}/illusts/bookmarks?tag=&offset=${offset}&limit=${limit}&rest=${rest}&lang=ja`;
 
   async function getRandomWork() {
-    const types = [];
+    const counts = await Promise.all([
+      api(bookmarkUrl("show", 0, 1)),
+      api(bookmarkUrl("hide", 0, 1))
+    ]);
 
-    for (const rest of ["show", "hide"]) {
-      const body = await getPage(rest, 0, 1);
-      const total = Number(body.total || 0);
+    const choices = counts
+      .map((body, index) => ({
+        rest: index === 0 ? "show" : "hide",
+        total: body.total || 0
+      }))
+      .filter((item) => item.total > 0);
 
-      if (total > 0) types.push({ rest, total });
-      await sleep(300);
-    }
+    if (!choices.length) throw new Error("ブックマーク作品が見つかりません");
 
-    const total = types.reduce((n, x) => n + x.total, 0);
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const total = choices.reduce((sum, item) => sum + item.total, 0);
+      let pick = Math.floor(Math.random() * total);
+      let selected = choices[0];
 
-    if (!total) {
-      throw new Error("ブックマークが見つかりません");
-    }
-
-    let choice = Math.floor(Math.random() * total);
-    let selectedType = types[0];
-
-    for (const type of types) {
-      if (choice < type.total) {
-        selectedType = type;
-        break;
+      for (const item of choices) {
+        if (pick < item.total) {
+          selected = item;
+          break;
+        }
+        pick -= item.total;
       }
-      choice -= type.total;
+
+      const body = await api(
+        bookmarkUrl(selected.rest, Math.floor(Math.random() * selected.total), 1)
+      );
+      const works = body.works || [];
+
+      if (works.length) {
+        const work = works[Math.floor(Math.random() * works.length)];
+        if (!history.length || work.id !== history[history.length - 1].work.id) {
+          return work;
+        }
+      }
     }
 
-    const body = await getPage(selectedType.rest, choice, 1);
-    const work = body.works?.[0];
-
-    if (!work) {
-      throw new Error("作品を取得できませんでした");
-    }
-
-    return { work, total };
+    throw new Error("作品を取得できませんでした。もう一度お試しください");
   }
 
-  async function getWorkPages(workId) {
-    const response = await fetch(
-      `/ajax/illust/${workId}/pages`,
-      { credentials: "same-origin" }
-    );
-
-    if (!response.ok) {
-      throw new Error("ページ情報の取得に失敗しました");
+  async function getWorkPages(work) {
+    const body = await api(`/ajax/illust/${work.id}/pages?lang=ja`);
+    if (Array.isArray(body) && body.length) {
+      return body.map((page) =>
+        page.urls?.regular ||
+        page.urls?.original ||
+        page.urls?.small ||
+        work.url
+      ).filter(Boolean);
     }
-
-    const json = await response.json();
-
-    if (json.error || !json.body?.length) {
-      throw new Error("画像情報が見つかりません");
-    }
-
-    return json.body.map(page =>
-      page.urls.regular ||
-      page.urls.original
-    ).filter(Boolean);
+    return [work.url].filter(Boolean);
   }
 
   function updateButtons(entry) {
-    $("page-number").textContent =
-      `ページ ${entry.pageIndex + 1} / ${entry.pages.length}`;
+    const pageNumber = $("prg-page-number");
+    const pagePrev = $("prg-page-prev");
+    const pageNext = $("prg-page-next");
+    const workPrev = $("prg-work-prev");
+    const workNext = $("prg-work-next");
 
-    $("page-prev").disabled = busy || entry.pageIndex === 0;
-    $("page-next").disabled =
+    if (!entry) {
+      pageNumber.textContent = "";
+      pagePrev.disabled = true;
+      pageNext.disabled = true;
+      workPrev.disabled = busy || historyIndex <= 0;
+      workNext.disabled = busy;
+      return;
+    }
+
+    pageNumber.textContent =
+      `${entry.pageIndex + 1} / ${entry.pages.length}`;
+
+    pagePrev.disabled = busy || entry.pageIndex <= 0;
+    pageNext.disabled =
       busy || entry.pageIndex >= entry.pages.length - 1;
-
-    $("work-prev").disabled = busy || historyIndex <= 0;
-    $("next").disabled = busy;
+    workPrev.disabled = busy || historyIndex <= 0;
+    workNext.disabled = busy;
   }
 
-  async function showCurrentPage() {
+  function showCurrentPage() {
     const entry = history[historyIndex];
     if (!entry) return;
 
-    const id = ++requestId;
     busy = true;
     updateButtons(entry);
 
-    $("status").textContent = "画像を読み込んでいます...";
-
-    const img = $("image");
-    img.style.display = "none";
-
+    const img = $("prg-image");
     img.onload = () => {
-      if (id !== requestId) return;
-
-      img.style.display = "block";
-      $("status").textContent =
-        `全 ${entry.total} 件から選択`;
       busy = false;
-      updateButtons(entry);
+      updateButtons(history[historyIndex]);
     };
-
     img.onerror = () => {
-      if (id !== requestId) return;
-
-      $("status").textContent = "画像を表示できませんでした";
       busy = false;
-      updateButtons(entry);
+      updateButtons(history[historyIndex]);
+      $("prg-status").textContent = "画像を読み込めませんでした";
     };
 
+    $("prg-status").textContent = entry.work.title || "";
     img.src = entry.pages[entry.pageIndex];
   }
 
-  async function openEntry(entry) {
-    const id = ++requestId;
+  async function openWork(work, addToHistory = true) {
     busy = true;
-
-    $("status").textContent = "作品情報を取得しています...";
-    $("image").style.display = "none";
-
-    $("title").textContent = entry.work.title || "タイトル不明";
-    $("author").textContent =
-      "作者：" + (entry.work.userName || "不明");
-
-    $("link").href =
-      "https://www.pixiv.net/artworks/" + entry.work.id;
+    updateButtons(null);
+    $("prg-status").textContent = "作品を読み込み中…";
 
     try {
-      entry.pages = await getWorkPages(entry.work.id);
+      const pages = await getWorkPages(work);
+      if (!pages.length) throw new Error("画像が見つかりません");
 
-      if (id !== requestId) return;
+      const entry = {
+        work,
+        pages,
+        pageIndex: 0
+      };
 
-      entry.pageIndex = 0;
+      if (addToHistory) {
+        history = history.slice(0, historyIndex + 1);
+        history.push(entry);
 
-      await showCurrentPage();
+        if (history.length > 100) history.shift();
+        historyIndex = history.length - 1;
+      } else {
+        history[historyIndex] = entry;
+      }
 
+      showCurrentPage();
     } catch (error) {
-      if (id !== requestId) return;
-
-      entry.pages = [entry.work.url];
-      entry.pageIndex = 0;
-
-      $("status").textContent =
-        "ページ情報を取得できませんでした。通常画像を表示します";
-
-      await showCurrentPage();
+      console.error(error);
+      $("prg-status").textContent =
+        `読み込みエラー：${error.message}`;
+      busy = false;
+      updateButtons(history[historyIndex]);
     }
   }
 
   async function nextWork() {
     if (busy) return;
-
     busy = true;
-    $("status").textContent = "次の作品を探しています...";
     updateButtons(null);
 
     try {
-      // 途中から新しい作品へ進んだ場合、
-      // その先の履歴は新しい履歴に置き換える
-      history = history.slice(0, historyIndex + 1);
-
-      const result = await getRandomWork();
-
-      const entry = {
-        work: result.work,
-        total: result.total,
-        pages: [],
-        pageIndex: 0
-      };
-
-      history.push(entry);
-
-      // 履歴が増えすぎないよう最大100作品
-      if (history.length > 100) history.shift();
-
-      historyIndex = history.length - 1;
-
+      const work = await getRandomWork();
       busy = false;
-      await openEntry(entry);
-
+      await openWork(work);
     } catch (error) {
+      console.error(error);
+      $("prg-status").textContent =
+        `作品取得エラー：${error.message}`;
       busy = false;
-      $("status").textContent = "エラー：" + error.message;
       updateButtons(history[historyIndex]);
     }
   }
 
-  async function previousWork() {
+  function previousWork() {
     if (busy || historyIndex <= 0) return;
-
     historyIndex--;
-    await openEntry(history[historyIndex]);
+    showCurrentPage();
   }
 
-  async function changePage(direction) {
+  function nextPage() {
     if (busy) return;
-
     const entry = history[historyIndex];
-    if (!entry) return;
-
-    const nextIndex = entry.pageIndex + direction;
-
-    if (nextIndex < 0 || nextIndex >= entry.pages.length) return;
-
-    entry.pageIndex = nextIndex;
-    await showCurrentPage();
+    if (!entry || entry.pageIndex >= entry.pages.length - 1) return;
+    entry.pageIndex++;
+    showCurrentPage();
   }
 
-  button.addEventListener("click", () => {
-    overlay.style.display = "block";
-    if (historyIndex === -1) nextWork();
-  });
+  function previousPage() {
+    if (busy) return;
+    const entry = history[historyIndex];
+    if (!entry || entry.pageIndex <= 0) return;
+    entry.pageIndex--;
+    showCurrentPage();
+  }
 
-  $("close").addEventListener("click", () => {
-    overlay.style.display = "none";
-  });
+  function createGallery() {
+    if ($("prg-overlay")) return;
 
-  $("next").addEventListener("click", nextWork);
-  $("work-prev").addEventListener("click", previousWork);
-  $("page-prev").addEventListener("click", () => changePage(-1));
-  $("page-next").addEventListener("click", () => changePage(1));
+    const style = document.createElement("style");
+    style.textContent = `
+      #prg-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 999999;
+        background: rgba(0,0,0,.96);
+        color: white;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-family: sans-serif;
+      }
+      #prg-top {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        right: 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+      }
+      #prg-status {
+        font-size: 13px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 75%;
+      }
+      #prg-image {
+        max-width: 100%;
+        max-height: 78vh;
+        object-fit: contain;
+      }
+      #prg-controls {
+        position: absolute;
+        bottom: 20px;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+      }
+      #prg-overlay button,
+      #prg-launch {
+        border: 1px solid #777;
+        border-radius: 8px;
+        background: #292929;
+        color: white;
+        padding: 10px 14px;
+        font-size: 14px;
+      }
+      #prg-overlay button:disabled {
+        opacity: .35;
+      }
+      #prg-close {
+        background: #555 !important;
+      }
+      #prg-launch {
+        position: fixed;
+        right: 15px;
+        bottom: 90px;
+        z-index: 999998;
+        background: #5b3a9e;
+      }
+    `;
+    document.head.appendChild(style);
 
-  // 左右スワイプ
-  overlay.addEventListener("touchstart", event => {
-    if (event.target.closest("button, a")) return;
+    const launch = document.createElement("button");
+    launch.id = "prg-launch";
+    launch.textContent = "🎲 ランダムギャラリー";
+    document.body.appendChild(launch);
 
-    const touch = event.changedTouches[0];
-    touchStartX = touch.clientX;
-    touchStartY = touch.clientY;
-  }, { passive: true });
+    const overlay = document.createElement("div");
+    overlay.id = "prg-overlay";
+    overlay.innerHTML = `
+      <div id="prg-top">
+        <span id="prg-status">準備完了</span>
+        <button id="prg-close">閉じる ✕</button>
+      </div>
+      <img id="prg-image" alt="Pixiv illustration">
+      <div id="prg-controls">
+        <button id="prg-work-prev">前の作品</button>
+        <button id="prg-page-prev">前のページ</button>
+        <span id="prg-page-number"></span>
+        <button id="prg-page-next">次のページ</button>
+        <button id="prg-work-next">次の作品 🎲</button>
+      </div>
+    `;
+    document.body.appendChild(overlay);
 
-  overlay.addEventListener("touchend", event => {
-    if (event.target.closest("button, a")) return;
+    launch.addEventListener("click", () => {
+      overlay.style.display = "flex";
+      if (historyIndex < 0) nextWork();
+    });
 
-    const touch = event.changedTouches[0];
-    const diffX = touch.clientX - touchStartX;
-    const diffY = touch.clientY - touchStartY;
+    $("prg-close").addEventListener("click", () => {
+      overlay.style.display = "none";
+    });
 
-    if (
-      Math.abs(diffX) > 60 &&
-      Math.abs(diffX) > Math.abs(diffY) * 1.3
-    ) {
-      const entry = history[historyIndex];
-      if (!entry || busy) return;
+    $("prg-work-prev").addEventListener("click", previousWork);
+    $("prg-work-next").addEventListener("click", nextWork);
+    $("prg-page-prev").addEventListener("click", previousPage);
+    $("prg-page-next").addEventListener("click", nextPage);
 
-      if (diffX < 0) {
-        // 左：次のページ。最終ページなら次の作品
-        if (entry.pageIndex < entry.pages.length - 1) {
-          changePage(1);
+    overlay.addEventListener("touchstart", (event) => {
+      if (event.target.closest("button")) return;
+      touchStartX = event.changedTouches[0].screenX;
+      touchStartY = event.changedTouches[0].screenY;
+    }, { passive: true });
+
+    overlay.addEventListener("touchend", (event) => {
+      if (event.target.closest("button")) return;
+
+      const dx = event.changedTouches[0].screenX - touchStartX;
+      const dy = event.changedTouches[0].screenY - touchStartY;
+
+      if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return;
+
+      if (dx < 0) {
+        const entry = history[historyIndex];
+        if (entry && entry.pageIndex < entry.pages.length - 1) {
+          nextPage();
         } else {
           nextWork();
         }
       } else {
-        // 右：前のページ。1ページ目なら前の作品
-        if (entry.pageIndex > 0) {
-          changePage(-1);
+        const entry = history[historyIndex];
+        if (entry && entry.pageIndex > 0) {
+          previousPage();
         } else {
           previousWork();
         }
       }
-    }
-  }, { passive: true });
+    }, { passive: true });
+  }
 
+  createGallery();
 })();
